@@ -1,2 +1,2 @@
-# thesis_al_test
+# bsc-thesis-al-testing
 test
