@@ -1,72 +1,152 @@
-import random, collections, copy, math
-from decimal import *
-import prob_distributions as prob_d
+import probabilities as pr
+import random, copy, re
 
-ndomains=0
-
-features={}
-actions={}
-val_prob_seq = 0
-
+features = {}
+actions = {}
+prob_size_sequence = 0
 
 class tree:
 
-	def __init__(self):
-		self.root = None
+	def __init__(self, root=None):
+		self.root=root
 
-	def add_root(self, variable):
-		root = node(variable, None, None)
-		self.root = root
-		return root
+	def add_root(self,label=None):
+		self.root=node(label)
+		return self.root
 
 	def __str__(self):
-		if self.root != None:
-			res = self.root.variable + ":\n"
-			for x in self.root.children:
-				res = res + self.__rec_print(self.root.children[x],len(self.root.variable)+1)
-		else:
-			res="None"
+		res = str(self.root)
+		length = len(res)+1
+		if self.root:
+			if self.root.children:
+				res+=':\n'
+				for value in self.root.children:
+					res += ' '*(len(str(self.root))+1) + str(value) + "--->" + self.__rec_print(self.root.children[value], length+len(str(value))+4)
 		return res
-
+	
 	def __rec_print(self, node, length):
-		res = ' '*length + str(node.value) + " ---> " + str(node.variable) 
-		if not node.variable:
-			return res+"\n"
-		res = res + ": "
-		if not node.children:
-			res = res + str(node.action_value) + "\n"
+		res = str(node)
+		if node.children:
+			res+=':\n'
+			for value in node.children:
+				res += ' '*(length+len(str(node))+1) + str(value) + "--->" + self.__rec_print(node.children[value], length+len(str(node))+4)
+		elif node.action_value != None:
+			res+=': ' + str(node.action_value) + '\n'
 		else:
-			res = res+"\n"
-			for x in node.children:
-				res = res + self.__rec_print(node.children[x],length+len(node.variable)+len(str(node.value))+7)
+			res+='\n'
 		return res
 
-	def __eq__(self, other):
-		f_root=self.root
-		s_root=other.root
-		if f_root == s_root:
-			return True
-		elif (f_root == None and s_root != None) or (f_root != None and s_root == None):
-			return False
-		elif not f_root.variable == s_root.variable:
-			return False
-		else:
-			for child in f_root.children:
-				if not self.__rec_eq(f_root.children[child], s_root.children[child]):
-					return False
-		return True
+	def create_random_tree(self):
+		global features, actions, prob_size_sequence
+		num_features = len(features)
+		prior_prob_f = 0.90
+		copy_features = copy.deepcopy(features)
+		copy_actions = copy.deepcopy(actions)
+		root = self.add_root(random.choices(list(features), k=1)[0])
+		values = copy.deepcopy(features[str(root)])
+		original_size = len(values)
+		del copy_features[str(root)]
+		while values:
+			value = values[0]
 
-	def __rec_eq(self, f_node, s_node):
-		if not f_node.variable == s_node.variable:
-			return False
-		else:
-			if f_node.action_value != None:
-				return True
+			#compute prob. size of the sequence
+			res_prob_seq = pr.binomial(len(values)-1, prob_size_sequence)
+			size_seq = random.choices([n+1 for n in range(len(values))], weights=[float(x) for x in res_prob_seq], k=1)[0] 
+			if len(values)-size_seq < 2:
+				size_seq=len(values)
+
+			#compute prob. of a feature or of an action
+			prob_f_a = pr.p_feat_action(num_features, prior_prob_f, prior_prob_f)
+			res_f_a = random.choices(["f","a"], weights=[float(x) for x in prob_f_a], k=1)[0]
+			
+			if res_f_a=="a" or not copy_features: #if action is the outcome or there are no features
+				action = random.choices(list(copy_actions), k=1)[0]
+				action_value = random.choices(copy_actions[action])[0]
+				copy_actions[action].remove(action_value)
+				if not copy_actions[action]:
+					del copy_actions[action]
+				ind_val = values.index(value)
+				while size_seq:
+					root.children[values[ind_val]].add_label(action, action_value)
+					ind_val+=1
+					size_seq-=1
+			
+			else: #if feature is the outcome
+				feature = random.choices(list(copy_features), k=1)[0]
+				ind_val = values.index(value)
+				while size_seq:
+					root.children[values[ind_val]].add_label(feature)
+					self.__rec_create_random_tree(root.children[values[ind_val]], copy.deepcopy(copy_features), actions, prior_prob_f, prob_f_a[0], num_features)
+					ind_val+=1
+					size_seq-=1
+			values = values[ind_val:]
+
+
+
+	def __rec_create_random_tree(self, node, features, actions, prior_prob_f, prob_f, num_features):
+		global prob_size_sequence
+		copy_actions = copy.deepcopy(actions)
+		values = copy.deepcopy(features[str(node)])
+		original_size = len(values)
+		del features[str(node)]
+		while values:
+			value = values[0]
+
+			#compute prob. size of the sequence
+			res_prob_seq = pr.binomial(len(values)-1, prob_size_sequence)
+			size_seq = random.choices([n+1 for n in range(len(values))], weights=[float(x) for x in res_prob_seq], k=1)[0] 
+			if len(values)-size_seq < 2:
+				size_seq=len(values)
+
+			#compute prob. of a feature or of an action
+			prob_f_a = pr.p_feat_action(num_features, prior_prob_f, prob_f)
+			res_f_a = random.choices(["f","a"], weights=[float(x) for x in prob_f_a], k=1)[0]
+
+			if res_f_a=="a" or not features: #if action is the outcome or there are no features
+				action = random.choices(list(copy_actions), k=1)[0]
+				action_value = random.choices(copy_actions[action])[0]
+				copy_actions[action].remove(action_value)
+				if not copy_actions[action]:
+					del copy_actions[action]
+				ind_val = values.index(value)
+				while size_seq:
+					node.children[values[ind_val]].add_label(action, action_value)
+					ind_val+=1
+					size_seq-=1
+			
+			else: #if feature is the outcome
+				feature = random.choices(list(features), k=1)[0]
+				ind_val = values.index(value)
+				while size_seq:
+					node.children[values[ind_val]].add_label(feature)
+					self.__rec_create_random_tree(node.children[values[ind_val]], copy.deepcopy(features), actions, prior_prob_f, prob_f, num_features)
+					ind_val+=1
+					size_seq-=1
+			values = values[ind_val:]
+
+	def final_tree(self):
+		root = self.root
+		if root.label == None:
+			return
+		for child in root.children:
+			self.__rec_final_tree(root.children[child])
+
+
+	def __rec_final_tree(self, node):
+		if node.label == None:
+			if len(node.most_likely.split(";")) == 2: #feature
+				node.add_label(node.most_likely.split(";")[0])
 			else:
-				for child in f_node.children:
-					if not self.__rec_eq(f_node.children[child], s_node.children[child]):
-						return False
-		return True
+				action = node.most_likely.split(":")
+				action_value = action[1]
+				node.add_label(action[0], int(action_value))
+		elif node.action_value == None:
+			for child in node.children:
+				self.__rec_final_tree(node.children[child])
+
+
+
+
 
 
 
@@ -74,230 +154,89 @@ class tree:
 
 class node:
 
-	def __init__(self, variable, value=None, parent=None):
-		global features
-		self.variable=variable
-		self.value=value
+	def __init__(self, label=None, parent=None):
+		global features, actions
+		self.u=0
+		self.label=label
+		self.children={}
 		self.action_value=None
-		self.utility=None
-		self.parent=parent
-		if variable:
-			children={}
-			for val in features[variable]:
-				children[val] = node(None, val, self)
-			self.children=children
+		self.parent = parent
+		self.most_likely = None
+
+		if self.label != None and self.action_value == None: #if is a feature, for each value add children nodes
+			self.__add_children()
+
+	def __add_children(self): #create children nodes of the feature
+		for value in features[self.label]:
+			self.children[value] = node(None, self)
+
+	def add_label(self, label, action_value=None): #assign the label to the node, if is a feature create the children nodes
+		self.label = label
+		if action_value:
+			self.action_value=action_value
 		else:
-			self.children=None
+			self.__add_children()
 
-	def add_feature(self, variable):
-		global features
-		self.variable=variable
-		children={}
-		for val in features[self.variable]:
-			children[val] = node(None, val, self)
-		self.children = children
+	def __str__(self):
+		return str(self.label)
 
-	def add_action(self, action, value):
-		self.variable = action
-		self.action_value = value
+	def count_nodes_subtree(self):
+		res = 1
+		for value in self.children:
+			res+=self.children[value].count_nodes_subtree()
+		return res
 
+	def count_actions_subtree(self):
+		res = 0
+		if self.label != None and self.action_value != None:
+			res+=1
+		else:
+			if self.children:
+				for child in self.children:
+					res+=self.children[child].count_actions_subtree()
+		return res	 
 
-
-
-def create_features(num, minim, maxim):
+def create_features(numb, minim, maxim):
 	global features
-	p_numdom_features = prob_d.binomial(maxim-minim, 0.5)
-	dict_prob = {}
-	for prob in p_numdom_features: # create the dictionary with value,prob
-		dict_prob[minim] = prob
-		minim+=1
-	for n in range(num): #create num features, by picking the size randomly on the prob distribution
-		n+=1
-		extracted = random.choices([val for val in dict_prob], weights=tuple([float(dict_prob[prob]) for prob in dict_prob]), k=1)
-		features[f"feature{n}"] = [x+1 for x in range(extracted[0])]
+	prob = pr.binomial(maxim-minim+1, 0.50)
+	sizes = [x for x in range(minim,maxim+1)]
+	for n in range(numb):
+		prob = pr.binomial(maxim-minim, 0.50)
+		size = random.choices(sizes, weights=[float(x) for x in prob], k=1)[0]
+		features[f"feature{n+1}"] = [x+1 for x in range(size)]
 	return features
 
-def create_actions(num, minim, maxim):
+def create_actions(numb, minim, maxim):
 	global actions
-	p_numdom_actions = prob_d.binomial(maxim-minim, 0.5)
-	dict_prob = {}
-	for prob in p_numdom_actions: # create the dictionary with value,prob
-		dict_prob[minim] = prob
-		minim+=1
-	for n in range(num): #create num actions, by picking the size randomly on the prob distribution
-		n+=1
-		extracted = random.choices([val for val in dict_prob], weights=tuple([float(dict_prob[prob]) for prob in dict_prob]), k=1)
-		actions[f"action{n}"] = [x+1 for x in range(extracted[0])]
+	prob = pr.binomial(maxim-minim+1, 0.50)
+	sizes = [x for x in range(minim,maxim+1)]
+	for n in range(numb):
+		prob = pr.binomial(maxim-minim, 0.50)
+		size = random.choices(sizes, weights=[float(x) for x in prob], k=1)[0]
+		actions[f"action{n+1}"] = [x+1 for x in range(size)]
 	return actions
 
-
-def create_random_tree(features, actions, prior_prob_f):
-	global val_prob_seq
-	temp_actions = copy.deepcopy(actions)
-	size_f_dom = len(features)
-	prior_prob_f = Decimal(str(prior_prob_f))
-	new_tree=tree()
-	root = random.choices(list(features),k=1)[0]
-	root_values = features[root]
-	root = new_tree.add_root(root)
-	del features[root.variable]
-	orig_size = len(root_values)
-	while root_values:
-		# choose the value from the domain of the variable
-		val = root_values[0]
-		prob_f_a = prob_d.p_feat_action(size_f_dom, prior_prob_f, prior_prob_f)
-		if not features:
-			f_a = "a"
-		else:
-			#choose if use a feature or an action
-			f_a = random.choices(["f","a"], weights=(float(prob_f_a[0]),float(prob_f_a[1])), k=1)[0]
-
-		if f_a == "a":
-			#choose an action,value and remove them from the temp dict
-			action = random.choices(list(temp_actions), k=1)[0] #choice uniformly an action
-			action_value = random.choices(temp_actions[action], k=1)[0] #choice uniformly a value
-			val_ind = root_values.index(val)
-			if len(root_values)< (Decimal(str(1/4))*orig_size):
-				num_seq=len(root_values)-val_ind
-			else:
-				#pick, upon the distribution, the number of sequence, from the remaining
-				prob_seq = prob_d.binomial((len(root_values)-root_values.index(val))-2, val_prob_seq) #binomial distribution for the numb of sequence
-				num_seq = random.choices([x+1 for x in range(len(prob_seq))], weights=[float(n) for n in prob_seq], k=1)[0] #choice, by the distr., the num of sequence
-			i = num_seq
-			while i:
-				root.children[root_values[val_ind]].add_action(action, action_value)
-				val_ind+=1
-				i-=1
-			val_ind = root_values.index(val)
-			del root_values[val_ind:val_ind+num_seq]
-		else: #feature
-			feature = random.choices(list(features),k=1)[0]
-			val_ind = root_values.index(val)
-			if len(root_values)< (Decimal(str(1/4))*orig_size):
-				num_seq=len(root_values)-val_ind
-			else:
-				prob_seq = prob_d.binomial((len(root_values)-root_values.index(val))-2, val_prob_seq) #binomial distribution for the num of sequence
-				num_seq = random.choices([x+1 for x in range(len(prob_seq))], weights=[float(n) for n in prob_seq], k=1)[0] #choice, by the distr., the num of sequence
-			i = num_seq
-			while i:
-				root.children[root_values[val_ind]].add_feature(feature)
-				rec_create_random_tree(root.children[root_values[val_ind]], copy.deepcopy(features), actions, prior_prob_f, prob_f_a[0], size_f_dom)
-				val_ind+=1
-				i-=1
-			val_ind = root_values.index(val)
-			del root_values[val_ind:val_ind+num_seq]
-			del features[feature]
-	return new_tree
-
-
-def rec_create_random_tree(node, features, actions, prior_prob_f, prob_f, size_f_dom):
-	temp_actions = copy.deepcopy(actions)
-	node_values = features[node.variable]
-	del features[node.variable]
-	orig_size = len(node_values)
-	while node_values:
-		val = node_values[0]
-		prob_f_a = prob_d.p_feat_action(size_f_dom, prior_prob_f, prob_f)
-		if not features:
-			f_a="a"
-		else:
-			f_a = random.choices(["f","a"], weights=(float(prob_f_a[0]),float(prob_f_a[1])), k=1)[0]
-		if f_a == "a":
-			action = random.choices(list(temp_actions), k=1)[0] #choice uniformly an action
-			action_value = random.choices(temp_actions[action], k=1)[0] #choice uniformly a value
-			val_ind = node_values.index(val)
-			if len(node_values)< (Decimal(str(1/4))*orig_size):
-				num_seq=len(node_values)-val_ind
-			else:
-				prob_seq = prob_d.binomial((len(node_values)-node_values.index(val))-1, val_prob_seq) #binomial distribution for the num of sequence
-				num_seq = random.choices([x+1 for x in range(len(prob_seq))], weights=[float(n) for n in prob_seq], k=1)[0] #choice, by the distr., the num of sequence
-			i = num_seq
-			while i:
-				node.children[node_values[val_ind]].add_action(action, action_value)
-				val_ind+=1
-				i-=1
-			val_ind = node_values.index(val)
-			del node_values[val_ind:val_ind+num_seq]
-		else: #feature
-			feature = random.choices(list(features),k=1)[0]
-			val_ind = node_values.index(val)
-			if len(node_values)< (Decimal(str(1/4))*orig_size):
-				num_seq=len(node_values)-val_ind
-			else:
-				prob_seq = prob_d.binomial((len(node_values)-node_values.index(val))-1, val_prob_seq) #binomial distribution for the num of sequence
-				num_seq = random.choices([x+1 for x in range(len(prob_seq))], weights=[float(n) for n in prob_seq], k=1)[0] #choice, by the distr., the num of sequence
-			i = num_seq
-			while i:
-				node.children[node_values[val_ind]].add_feature(feature)
-				rec_create_random_tree(node.children[node_values[val_ind]], copy.deepcopy(features), actions, prior_prob_f, prob_f_a[0], size_f_dom)
-				val_ind+=1
-				i-=1
-			val_ind = node_values.index(val)
-			del node_values[val_ind:val_ind+num_seq]
-			del features[feature]
-
-
-def count_errors(f_tree, s_tree): #f_tree oracle
-	f_root=f_tree.root
-	s_root=s_tree.root
-	total_nodes=1
-	diff_nodes=0
-	if (s_root == None):
-		diff_nodes +=1
-		rem = rec_count_nodes(f_root)
-		return (total_nodes+rem, diff_nodes+rem)
-	elif not f_root.variable == s_root.variable:
-		diff_nodes+=1
-		rem = rec_count_nodes(f_root)
-		return (total_nodes+rem, diff_nodes+rem)
-	for child in f_root.children:
-		res = rec_count_errors(f_root.children[child],s_root.children[child])
-		total_nodes += res[0]
-		diff_nodes += res[1]
-	return (total_nodes, diff_nodes)
-
-def rec_count_errors(f_node, s_node):
-	total_nodes = 1
-	diff_nodes = 0
-	if not f_node.variable == s_node.variable:
-		diff_nodes += 1
-		rem = rec_count_nodes(f_node)
-		return (total_nodes+ rem, diff_nodes+rem)
+def count_different_nodes(first, second):
+	res = 0
+	if str(first.root) != str(second.root):
+		res+=first.root.count_nodes_subtree()
 	else:
-		if not f_node.children: #azione
-			if f_node.action_value != s_node.action_value:
-				diff_nodes +=1
-		else:
-			for child in f_node.children:
-				res = rec_count_errors(f_node.children[child],s_node.children[child])
-				total_nodes += res[0]
-				diff_nodes += res[1]
-	return (total_nodes, diff_nodes)
+		for value in first.root.children:
+			res+=rec_count_different_nodes(first.root.children[value], second.root.children[value])
+	return res
 
-def rec_count_nodes(f_node):
-	total_nodes = 0
-	if f_node.children:
-		for child in f_node.children:
-			total_nodes += 1
-			total_nodes += rec_count_nodes(f_node.children[child])
-	return total_nodes
-
-def count_decisions(node):
-	count = 0
-	if node.action_value != None:
-		count +=1
+def rec_count_different_nodes(first, second):
+	res = 0
+	if first.label != second.label:
+		res+=first.count_nodes_subtree()
 	else:
-		for ch in node.children:
-			count += count_decisions(node.children[ch])
-	return count
+		if first.children: #if they are features
+			for value in first.children:
+				res+=rec_count_different_nodes(first.children[value], second.children[value])
+	return res
 
-#--------------------------------------------------------------------------------------------------------------
 
 
-def frange(x, max, step):
-	while x<=max:
-		yield float(x)
-		x+=step
 
-#--------------------------------------------------------------------------------------------------------------
+
 
